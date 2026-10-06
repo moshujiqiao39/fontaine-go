@@ -69,6 +69,26 @@ const tenkyu = AI.chooseMove(open, 8);
 const tenDist = Math.max(Math.abs(tenkyu.x - 3), Math.abs(tenkyu.y - 3));
 assert(!tenkyu.pass && tenDist >= 8, "10k takes an empty corner");
 
+const settled = E.Game.fromSetup(19, [[3, 3], [15, 3], [3, 15]], [[15, 15]], E.WHITE);
+const hang = AI.chooseMove(settled, 26);
+const knight = [[3, 3], [15, 3], [3, 15]].some(function (s) {
+  const dx = Math.abs(hang.x - s[0]);
+  const dy = Math.abs(hang.y - s[1]);
+  return dx + dy === 3 && Math.max(dx, dy) === 2;
+});
+console.log("9d joseki approach", hang);
+assert(knight, "9d approaches a star with a small knight");
+
+const answered = E.Game.fromSetup(19, [[3, 3], [3, 15], [15, 15]], [[5, 2], [15, 3]], E.BLACK);
+const reply = AI.chooseMove(answered, 26);
+console.log("9d joseki reply", reply);
+assert(reply.x === 2 && reply.y === 5, "9d answers the approach");
+
+const tsuke = E.Game.fromSetup(19, [[3, 2]], [[5, 2]], E.BLACK);
+const bend = AI.chooseMove(tsuke, 26);
+console.log("9d tsuke", bend);
+assert(bend.x === 4 && bend.y === 2, "9d plays the attach joseki");
+
 const t0 = Date.now();
 const game = new E.Game(9);
 let moves = 0;

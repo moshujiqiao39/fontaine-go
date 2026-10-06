@@ -17,11 +17,11 @@
   function profileFor(rankIndex, size) {
     const rank = Math.max(0, Math.min(26, rankIndex));
     let ply = 0;
-    if (rank >= 24 && size <= 13) ply = 3;
-    else if (rank >= 18) ply = 2;
-    else if (rank >= 6) ply = 1;
-    let width = rank >= 18 ? 10 : rank >= 12 ? 8 : 6;
-    if (size >= 19) width = Math.min(width, rank >= 22 ? 8 : 6);
+    if (rank >= 20) ply = 3;
+    else if (rank >= 8) ply = 2;
+    else if (rank >= 3) ply = 1;
+    let width = rank >= 20 ? 7 : rank >= 8 ? 6 : 5;
+    if (size >= 19) width = Math.min(width, ply >= 3 ? 4 : 6);
     return {
       blunder: rank <= 2 ? 0.55 - rank * 0.08 : rank <= 8 ? 0.28 - (rank - 2) * 0.025 : rank <= 17 ? Math.max(0.02, 0.08 - (rank - 8) * 0.006) : 0,
       blunderPool: rank < 6 ? 4 : 2,
@@ -121,6 +121,22 @@
       }
     }
     const list = [];
+    const radius = profile.local ? 2 : (profile.ply >= 2 ? 3 : 2);
+    if (stones > 0 && radius > 2) {
+      for (let i = 0; i < total; i++) {
+        if (!board[i]) continue;
+        const x = i % size;
+        const y = (i / size) | 0;
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+            near[ny * size + nx] = 1;
+          }
+        }
+      }
+    }
     if (stones === 0) {
       const lines = starPoints(size);
       for (let a = 0; a < lines.length; a++) {
@@ -132,7 +148,7 @@
     for (let i = 0; i < total; i++) {
       if (board[i] === EMPTY && near[i] && i !== ko) list.push(i);
     }
-    if (profile.opening && stones > 0 && stones < (size >= 19 ? 20 : 10)) {
+    if (profile.opening && !profile.local && stones > 0 && stones < (size >= 19 ? 20 : 10)) {
       const empty = emptyCornerKeys(board, size);
       for (let e = 0; e < empty.length; e++) {
         const pts = openingPointsForCorner(size, empty[e]);
@@ -211,6 +227,18 @@
       else if (v === opp) enemy++;
     }
     score += friendly * 4 + enemy * 3;
+    if (placed.captured === 0 && friendly > 0) {
+      const touched = new Uint8Array(size * size);
+      let groupsTouched = 0;
+      for (let n = 0; n < around.length; n++) {
+        const j = around[n];
+        if (board[j] === color && !touched[j]) {
+          groupsTouched++;
+          Engine.collectGroup(board, size, j, touched);
+        }
+      }
+      if (groupsTouched >= 2) score += 18;
+    }
     if (friendly >= 3 && enemy === 0 && placed.captured === 0) score -= 8;
     if (placed.captured === 0 && threatened === 0 && self.libs >= 2 && profile.seeEyes) {
       if (enemy === 0 && friendly >= 1) score -= 36;
@@ -400,6 +428,102 @@
     return best;
   }
 
+  const BOOK = [
+    { stones: [[3, 3, "O"]], move: [5, 2], loose: true },
+    { stones: [[3, 3, "S"], [5, 2, "O"]], move: [2, 5], loose: true },
+    { stones: [[3, 3, "O"], [5, 2, "S"], [2, 5, "O"]], move: [8, 2], loose: true },
+    { stones: [[3, 3, "S"], [2, 2, "O"]], move: [2, 3], loose: false },
+    { stones: [[3, 2, "O"]], move: [5, 3], loose: true },
+    { stones: [[3, 2, "S"], [5, 3, "O"]], move: [2, 4], loose: true },
+    { stones: [[3, 2, "S"], [5, 2, "O"]], move: [4, 2], loose: false },
+    { stones: [[3, 2, "O"], [5, 2, "S"], [4, 2, "O"]], move: [4, 1], loose: false },
+    { stones: [[3, 2, "S"], [5, 2, "O"], [4, 2, "S"], [4, 1, "O"]], move: [4, 3], loose: false },
+    { stones: [[3, 2, "O"], [5, 2, "S"], [4, 2, "O"], [4, 1, "S"], [4, 3, "O"]], move: [7, 2], loose: true },
+  ];
+
+  function cornerRoom(board, size, x, y) {
+    let near = 0;
+    const span = 5;
+    for (let dy = -span; dy <= span; dy++) {
+      for (let dx = -span; dx <= span; dx++) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+        if (board[ny * size + nx]) near++;
+      }
+    }
+    return near;
+  }
+
+  function matchBook(board, size, color, ko, ox, oy, sx, sy, pattern) {
+    const box = 6;
+    const need = Object.create(null);
+    for (let i = 0; i < pattern.stones.length; i++) {
+      const stone = pattern.stones[i];
+      const x = ox + sx * stone[0];
+      const y = oy + sy * stone[1];
+      if (x < 0 || y < 0 || x >= size || y >= size) return null;
+      need[y * size + x] = stone[2] === "S" ? color : Engine.other(color);
+    }
+    for (let ly = 0; ly < box; ly++) {
+      for (let lx = 0; lx < box; lx++) {
+        const x = ox + sx * lx;
+        const y = oy + sy * ly;
+        if (x < 0 || y < 0 || x >= size || y >= size) continue;
+        const idx = y * size + x;
+        if ((board[idx] || 0) !== (need[idx] || 0)) return null;
+      }
+    }
+    const mx = ox + sx * pattern.move[0];
+    const my = oy + sy * pattern.move[1];
+    if (mx < 0 || my < 0 || mx >= size || my >= size || my * size + mx === ko) return null;
+    if (!Engine.placeStone(board, size, mx, my, color, ko)) return null;
+    return my * size + mx;
+  }
+
+  function josekiMove(board, size, color, ko, allowLoose) {
+    if (size < 13) return null;
+    const corners = [
+      [0, 0, 1, 1],
+      [size - 1, 0, -1, 1],
+      [0, size - 1, 1, -1],
+      [size - 1, size - 1, -1, -1],
+    ];
+    let best = null;
+    let bestRank = -1;
+    let bestRoom = 1e9;
+    for (let c = 0; c < corners.length; c++) {
+      const ox = corners[c][0];
+      const oy = corners[c][1];
+      const sx = corners[c][2];
+      const sy = corners[c][3];
+      for (let p = 0; p < BOOK.length; p++) {
+        const pattern = BOOK[p];
+        if (pattern.loose && !allowLoose) continue;
+        const mirrors = [
+          pattern,
+          {
+            stones: pattern.stones.map(function (s) { return [s[1], s[0], s[2]]; }),
+            move: [pattern.move[1], pattern.move[0]],
+            loose: pattern.loose,
+          },
+        ];
+        for (let m = 0; m < mirrors.length; m++) {
+          const hit = matchBook(board, size, color, ko, ox, oy, sx, sy, mirrors[m]);
+          if (hit == null) continue;
+          const room = cornerRoom(board, size, hit % size, (hit / size) | 0);
+          const rank = (pattern.loose ? 0 : 2) + (pattern.stones.length >= 2 ? 1 : 0);
+          if (rank > bestRank || (rank === bestRank && room < bestRoom)) {
+            bestRank = rank;
+            bestRoom = room;
+            best = hit;
+          }
+        }
+      }
+    }
+    return best;
+  }
+
   function chooseOnBoard(board, size, color, ko, rankIndex, stoneCount) {
     const profile = profileFor(rankIndex, size);
     const openingPhase = profile.opening && stoneCount < (size >= 19 ? 12 : 8) && emptyCornerKeys(board, size).length > 0;
@@ -415,6 +539,11 @@
     }
     const tactical = urgent(board, size, color, ko, profile);
     if (tactical != null && Math.random() > profile.blunder * 0.35) return tactical;
+
+    if (rankIndex >= 8 || Math.random() > 0.55) {
+      const book = josekiMove(board, size, color, ko, emptyCornerKeys(board, size).length === 0);
+      if (book != null) return book;
+    }
 
     let scored = rankedMoves(board, size, color, ko, profile, stoneCount);
     if (!scored.length) return null;
@@ -460,7 +589,8 @@
       ply: 0,
       width: 4,
       noise: 0,
-      opening: profile.opening,
+      opening: false,
+      local: true,
       contactPenalty: profile.contactPenalty || 16,
       capture: profile.capture || 120,
       atari: profile.atari || 30,

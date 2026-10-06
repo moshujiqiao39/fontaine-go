@@ -28,6 +28,7 @@
     hover: null,
     hint: null,
     puzzleIndex: 0,
+    puzzleFilter: "all",
     puzzleStep: 0,
     puzzleLock: false,
     note: "",
@@ -301,7 +302,7 @@
         field("我方", '<select id="color"><option value="1">那维莱特（黑，先手）</option><option value="2">莱欧斯利（白）</option></select>'),
         '<button type="button" class="primary" id="start">开始对局</button>',
         state.phase === "score" ? "" : playActions(),
-        '<p class="help">中国规则，黑先，白贴 7.5 目。难度从 18 级到九段：等级越高，越少漏算，也越早收官。</p>',
+        '<p class="help">中国规则，黑先，白贴 7.5 目。段位越高，越会算吃子和征子。下完点「数子」，也可以认输。</p>',
       ].join("");
     } else if (state.mode === "exam") {
       const meta = state.exam
@@ -314,18 +315,22 @@
       } else {
         html += '<button type="button" class="primary" id="start">' + (state.exam ? "重新测评" : "开始测评") + "</button>";
         if (state.phase !== "score") {
-          html += '<div class="actions three"><button type="button" id="pass">停一手</button><button type="button" id="resign">认输</button><button type="button" id="count">数子</button></div>';
+          html += '<div class="actions"><button type="button" id="resign">认输</button><button type="button" id="count">数子</button></div>';
         }
-        html += '<p class="help">测评中不能悔棋。局面定了可以点「数子」，确认后再进入下一局。</p>';
+        html += '<p class="help">测评中不能悔棋。局面定了点「数子」，确认后再进入下一局。</p>';
       }
     } else if (state.mode === "puzzle") {
       const problem = PZ.PROBLEMS[state.puzzleIndex];
-      const options = PZ.PROBLEMS.map(function (item, i) {
+      const hands = Math.ceil(problem.line.length / 2);
+      const shown = puzzleIndices();
+      const options = shown.map(function (i) {
+        const item = PZ.PROBLEMS[i];
         return '<option value="' + i + '"' + (i === state.puzzleIndex ? " selected" : "") + ">" + item.rank + " · " + item.title + "</option>";
       }).join("");
       html = [
-        '<div class="puzzle-head"><h2>' + problem.title + '</h2><span class="badge">' + problem.rank + "</span></div>",
+        '<div class="puzzle-head"><h2>' + problem.title + '</h2><span class="badge">' + problem.rank + " · " + hands + " 手</span></div>",
         '<p class="help">' + problem.text + "</p>",
+        field("分段", '<select id="filter"><option value="all">全部</option><option value="low">18级到10级</option><option value="high">9级到1级</option><option value="dan">一段到九段</option></select>'),
         field("题目", '<select id="puzzle">' + options + "</select>"),
         '<div class="actions"><button type="button" id="prev">上一题</button><button type="button" id="next">下一题</button><button type="button" id="reset">重来</button><button type="button" id="hint">提示</button></div>',
         '<p class="note ' + (state.puzzleLock === "good" ? "good" : state.puzzleLock === "bad" ? "bad" : "") + '">' + (state.note || "黑先。点对的交叉点。") + "</p>",
@@ -349,7 +354,31 @@
     if (sizeSel) sizeSel.value = String(state.size);
     const colorSel = document.getElementById("color");
     if (colorSel) colorSel.value = String(state.userColor);
+    const filterSel = document.getElementById("filter");
+    if (filterSel) filterSel.value = state.puzzleFilter;
     bindControls();
+  }
+
+  function puzzleBand(rank) {
+    if (rank.indexOf("段") >= 0) return "dan";
+    const n = parseInt(rank, 10);
+    return n >= 10 ? "low" : "high";
+  }
+
+  function puzzleIndices() {
+    const out = [];
+    for (let i = 0; i < PZ.PROBLEMS.length; i++) {
+      if (state.puzzleFilter === "all" || puzzleBand(PZ.PROBLEMS[i].rank) === state.puzzleFilter) out.push(i);
+    }
+    return out.length ? out : [0];
+  }
+
+  function stepPuzzle(dir) {
+    const ids = puzzleIndices();
+    let pos = ids.indexOf(state.puzzleIndex);
+    if (pos < 0) pos = dir > 0 ? -1 : 0;
+    pos = (pos + dir + ids.length) % ids.length;
+    openPuzzle(ids[pos]);
   }
 
   function field(label, inner) {
@@ -357,7 +386,7 @@
   }
 
   function playActions() {
-    return '<div class="actions"><button type="button" id="pass">停一手</button><button type="button" id="undo">悔棋</button><button type="button" id="resign">认输</button><button type="button" id="count">数子</button></div>';
+    return '<div class="actions three"><button type="button" id="undo">悔棋</button><button type="button" id="resign">认输</button><button type="button" id="count">数子</button></div>';
   }
 
   function bindControls() {
@@ -366,15 +395,19 @@
     on("size", "change", function (el) { state.size = Number(el.value); savePrefs(); if (!state.game) draw(); });
     on("rank", "change", function (el) { state.rankIndex = Number(el.value); savePrefs(); });
     on("color", "change", function (el) { state.userColor = Number(el.value); savePrefs(); });
-    on("pass", "click", userPass);
     on("undo", "click", undo);
     on("resign", "click", resign);
     on("count", "click", function () { if (guardPlay()) enterScore(); });
     on("confirm", "click", confirmScore);
     on("resume", "click", resume);
+    on("filter", "change", function (el) {
+      state.puzzleFilter = el.value;
+      const ids = puzzleIndices();
+      openPuzzle(ids.indexOf(state.puzzleIndex) < 0 ? ids[0] : state.puzzleIndex);
+    });
     on("puzzle", "change", function (el) { openPuzzle(Number(el.value)); });
-    on("prev", "click", function () { openPuzzle((state.puzzleIndex + PZ.PROBLEMS.length - 1) % PZ.PROBLEMS.length); });
-    on("next", "click", function () { openPuzzle((state.puzzleIndex + 1) % PZ.PROBLEMS.length); });
+    on("prev", "click", function () { stepPuzzle(-1); });
+    on("next", "click", function () { stepPuzzle(1); });
     on("reset", "click", function () { openPuzzle(state.puzzleIndex); });
     on("hint", "click", showHint);
   }
@@ -408,17 +441,6 @@
 
   function guardPlay() {
     return state.game && state.phase === "play" && !state.thinking && state.mode !== "puzzle";
-  }
-
-  function userPass() {
-    if (!guardPlay()) return;
-    if (state.mode === "vs" && state.game.turn !== state.userColor) return;
-    state.game.pass();
-    tap();
-    if (state.game.over) enterScore();
-    else if (state.mode !== "local") scheduleAI();
-    renderStatus();
-    draw();
   }
 
   function undo() {
@@ -522,15 +544,24 @@
         return;
       }
       const move = AI.chooseMove(game, rank);
-      if (move.pass) game.pass();
-      else if (!game.play(move.x, move.y).ok) game.pass();
+      const played = applyAIMove(game, move);
       state.thinking = false;
-      if (game.over) enterScore();
+      if (!played || game.over) enterScore();
       else {
         renderStatus();
         draw();
       }
     }, 40);
+  }
+
+  function applyAIMove(game, move) {
+    if (!move || move.pass) return false;
+    if (game.play(move.x, move.y).ok) return true;
+    for (let i = 0; i < game.board.length; i++) {
+      if (game.board[i]) continue;
+      if (game.play(i % game.size, (i / game.size) | 0).ok) return true;
+    }
+    return false;
   }
 
   function openPuzzle(index) {
@@ -539,9 +570,12 @@
     state.puzzleStep = 0;
     state.puzzleLock = false;
     state.hint = null;
-    state.note = "";
+    const problem = PZ.PROBLEMS[index];
+    const hands = Math.ceil(problem.line.length / 2);
+    state.note = "黑先，共 " + hands + " 手。";
+    state.puzzleBranches = (problem.branches || [problem.line]).slice();
     state.phase = "play";
-    state.game = PZ.create(PZ.PROBLEMS[index]);
+    state.game = PZ.create(problem);
     renderControls();
     renderStatus();
     draw();
@@ -549,8 +583,9 @@
 
   function showHint() {
     const problem = PZ.PROBLEMS[state.puzzleIndex];
-    if (state.puzzleStep >= problem.line.length) return;
-    const move = problem.line[state.puzzleStep];
+    const line = (state.puzzleBranches && state.puzzleBranches[0]) || problem.line;
+    if (state.puzzleStep >= line.length) return;
+    const move = line[state.puzzleStep];
     state.hint = move;
     state.note = "看看 " + E.coordName(move[0], move[1], problem.size);
     renderControls();
@@ -560,7 +595,6 @@
   function puzzlePlay(x, y) {
     if (state.puzzleLock) return;
     const problem = PZ.PROBLEMS[state.puzzleIndex];
-    const expected = problem.line[state.puzzleStep];
     const played = state.game.play(x, y);
     if (!played.ok) {
       state.note = "这里不能下";
@@ -569,16 +603,11 @@
     }
     tap();
     state.hint = null;
-    const matched = expected && x === expected[0] && y === expected[1];
-    if (PZ.solved(state.game, problem) && (matched || problem.targets || problem.atari)) {
-      state.puzzleLock = "good";
-      state.note = "做对了";
-      renderControls();
-      renderStatus();
-      draw();
-      return;
-    }
-    if (!matched) {
+    const matched = (state.puzzleBranches || [problem.line]).filter(function (line) {
+      const mv = line[state.puzzleStep];
+      return mv && mv[0] === x && mv[1] === y;
+    });
+    if (!matched.length) {
       state.puzzleLock = "bad";
       state.note = "不对。点「重来」再试，或看提示。";
       renderControls();
@@ -586,21 +615,43 @@
       draw();
       return;
     }
-    state.puzzleStep += 1;
-    if (state.puzzleStep >= problem.line.length) {
-      state.puzzleLock = PZ.solved(state.game, problem) ? "good" : "bad";
-      state.note = state.puzzleLock === "good" ? "做对了" : "这步之后没有走到目标。";
+    state.puzzleBranches = matched;
+    if (PZ.solved(state.game, problem)) {
+      state.puzzleLock = "good";
+      state.note = "做对了";
       renderControls();
       renderStatus();
       draw();
       return;
     }
-    const reply = problem.line[state.puzzleStep];
-    state.game.play(reply[0], reply[1]);
     state.puzzleStep += 1;
-    if (state.puzzleStep >= problem.line.length || PZ.solved(state.game, problem)) {
-      state.puzzleLock = "good";
-      state.note = "做对了";
+    const active = state.puzzleBranches[0];
+    if (!active || state.puzzleStep >= active.length) {
+      state.puzzleLock = "bad";
+      state.note = "这步之后没有走到目标。";
+      renderControls();
+      renderStatus();
+      draw();
+      return;
+    }
+    const reply = active[state.puzzleStep];
+    if (!state.game.play(reply[0], reply[1]).ok) {
+      state.puzzleLock = "bad";
+      state.note = "这一路应手走不下去，请重来。";
+      renderControls();
+      renderStatus();
+      draw();
+      return;
+    }
+    state.puzzleStep += 1;
+    state.puzzleBranches = state.puzzleBranches.filter(function (line) {
+      const mv = line[state.puzzleStep - 1];
+      return mv && mv[0] === reply[0] && mv[1] === reply[1];
+    });
+    if (!state.puzzleBranches.length) state.puzzleBranches = [active];
+    if (PZ.solved(state.game, problem) || state.puzzleStep >= active.length) {
+      state.puzzleLock = PZ.solved(state.game, problem) ? "good" : "bad";
+      state.note = state.puzzleLock === "good" ? "做对了" : "这步之后没有走到目标。";
     } else {
       state.note = "白棋应了一手，请继续。";
     }

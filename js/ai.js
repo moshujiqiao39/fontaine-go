@@ -15,26 +15,28 @@
   });
 
   function profileFor(rankIndex, size) {
-    const t = Math.max(0, Math.min(26, rankIndex)) / 26;
-    const blunder = t < 0.45 ? 0.75 * (1 - t / 0.45) : Math.max(0, 0.08 * (1 - (t - 0.45) / 0.55));
-    let ply = rankIndex >= 22 ? 2 : rankIndex >= 11 ? 1 : 0;
-    let width = Math.round(4 + t * 8);
-    if (size >= 19 && ply === 2) {
-      ply = 1;
-      width = 8;
-    }
-    if (size >= 13 && ply === 2) width = 6;
+    const rank = Math.max(0, Math.min(26, rankIndex));
+    let ply = 0;
+    if (rank >= 24 && size <= 13) ply = 3;
+    else if (rank >= 18) ply = 2;
+    else if (rank >= 6) ply = 1;
+    let width = rank >= 18 ? 10 : rank >= 12 ? 8 : 6;
+    if (size >= 19) width = Math.min(width, rank >= 22 ? 8 : 6);
     return {
-      blunder: blunder,
-      blunderPool: Math.max(2, Math.round(7 - t * 4)),
-      missTactics: t < 0.5 ? 0.7 * (1 - t / 0.5) : Math.max(0, 0.06 * (1 - t)),
-      seeLadder: rankIndex >= 12,
-      seeEyes: rankIndex >= 6,
+      blunder: rank <= 2 ? 0.55 - rank * 0.08 : rank <= 8 ? 0.28 - (rank - 2) * 0.025 : rank <= 17 ? Math.max(0.02, 0.08 - (rank - 8) * 0.006) : 0,
+      blunderPool: rank < 6 ? 4 : 2,
+      missTactics: rank < 2 ? 0.45 : rank < 8 ? 0.12 : 0,
+      seeLadder: rank >= 8,
+      seeEyes: rank >= 1,
+      readKill: rank >= 8,
       ply: ply,
       width: width,
-      noise: (1 - t) * (1 - t) * 22,
-      passSlack: rankIndex >= 18 ? -1 : -28 - (17 - rankIndex) * 14,
-      opening: rankIndex >= 7,
+      noise: rank < 6 ? 5 : rank < 16 ? 0.7 : 0,
+      opening: rank >= 1,
+      contactPenalty: rank >= 14 ? 34 : rank >= 6 ? 24 : 8,
+      capture: rank >= 18 ? 180 : 120,
+      atari: rank >= 18 ? 48 : 30,
+      atariStone: rank >= 18 ? 9 : 4,
     };
   }
 
@@ -106,7 +108,7 @@
     if (profile.seeEyes && Engine.isEye(board, size, index, color)) return -400;
     const placed = Engine.placeStone(board, size, x, y, color, ko);
     if (!placed) return -1e9;
-    let score = placed.captured * 110;
+    let score = placed.captured * (profile.capture || 110);
     const self = Engine.collectGroup(placed.board, size, index, null);
     if (self.libs <= 1) score -= 70 + self.stones.length * 6;
     else if (self.libs === 2) score += 6;
@@ -122,7 +124,7 @@
         const g = Engine.collectGroup(placed.board, size, j, seen);
         if (g.libs === 1) {
           threatened++;
-          score += 28 + g.stones.length * 4;
+          score += (profile.atari || 28) + g.stones.length * (profile.atariStone || 4);
         } else if (g.libs === 2) score += 6;
       }
     }
@@ -141,15 +143,35 @@
       else if (friendly > 0 && enemy > 0) score -= 18;
     }
 
-    if (stoneCount < (size >= 19 ? 24 : 12) && profile.opening) {
+    let nearOpp = 99;
+    let nearOwn = 99;
+    for (let dy = -5; dy <= 5; dy++) {
+      for (let dx = -5; dx <= 5; dx++) {
+        if (!dx && !dy) continue;
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+        const v = board[ny * size + nx];
+        if (!v) continue;
+        const dist = Math.max(Math.abs(dx), Math.abs(dy));
+        if (v === opp && dist < nearOpp) nearOpp = dist;
+        if (v === color && dist < nearOwn) nearOwn = dist;
+      }
+    }
+    const early = stoneCount < (size >= 19 ? 40 : 20);
+    if (early && profile.opening && placed.captured === 0 && threatened === 0) {
+      if (nearOpp === 1) score -= profile.contactPenalty;
+      else if (nearOpp === 2) score += 22;
+      else if (nearOpp === 3) score += 10;
+      else if (nearOpp > 4) score -= 8;
+      if (nearOwn === 1 && nearOpp > 2) score -= 12;
       const line = Math.min(x, y, size - 1 - x, size - 1 - y) + 1;
-      if (line === 4) score += 18;
-      else if (line === 3) score += 14;
-      else if (line <= 2) score -= 28;
-      else if (line >= 7 && stoneCount < 8) score -= 6;
+      if (line === 4) score += 14;
+      else if (line === 3) score += 10;
+      else if (line <= 2) score -= 30;
       const stars = starPoints(size);
-      if (stars.indexOf(x) >= 0 && stars.indexOf(y) >= 0) score += 8;
-    } else if (!profile.opening && stoneCount < 10) {
+      if (stoneCount < 8 && stars.indexOf(x) >= 0 && stars.indexOf(y) >= 0) score += 12;
+    } else if (!profile.opening && stoneCount < 8) {
       score -= Math.min(x, y, size - 1 - x, size - 1 - y);
     }
 
@@ -239,8 +261,76 @@
     return scored;
   }
 
+  function stoneLeft(board, stones) {
+    for (let i = 0; i < stones.length; i++) {
+      if (board[stones[i]]) return stones[i];
+    }
+    return -1;
+  }
+
+  function capturesGroup(board, size, color, ko, stones, index, depth) {
+    const placed = Engine.placeStone(board, size, index % size, (index / size) | 0, color, ko);
+    if (!placed) return false;
+    const left = stoneLeft(placed.board, stones);
+    if (left < 0) return true;
+    if (depth >= 2) return false;
+    const group = Engine.collectGroup(placed.board, size, left, null);
+    if (group.libs === 0) return true;
+    if (group.libs > 2) return false;
+    const opp = Engine.other(color);
+    for (let i = 0; i < group.libPoints.length; i++) {
+      const lib = group.libPoints[i];
+      const reply = Engine.placeStone(placed.board, size, lib % size, (lib / size) | 0, opp, placed.ko);
+      if (!reply) return true;
+      const remain = stoneLeft(reply.board, stones);
+      if (remain < 0) return false;
+      const after = Engine.collectGroup(reply.board, size, remain, null);
+      if (after.libs === 0) continue;
+      if (after.libs === 1) {
+        if (!capturesGroup(reply.board, size, color, reply.ko, stones, after.libPoints[0], depth + 1)) return false;
+        continue;
+      }
+      let finished = false;
+      if (depth < 1) {
+        for (let k = 0; k < after.libPoints.length; k++) {
+          if (capturesGroup(reply.board, size, color, reply.ko, stones, after.libPoints[k], depth + 1)) {
+            finished = true;
+            break;
+          }
+        }
+      }
+      if (!finished) return false;
+    }
+    return group.libPoints.length > 0;
+  }
+
+  function findKill(board, size, color, ko) {
+    const groups = Engine.allGroups(board, size);
+    let best = null;
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+      if (group.color === color || group.libs < 1 || group.libs > 2 || group.stones.length > 7) continue;
+      for (let L = 0; L < group.libPoints.length; L++) {
+        const start = group.libPoints[L];
+        if (start === ko) continue;
+        if (!capturesGroup(board, size, color, ko, group.stones, start, 0)) continue;
+        if (!best || group.stones.length > best.gain) best = { index: start, gain: group.stones.length };
+      }
+    }
+    return best;
+  }
+
   function chooseOnBoard(board, size, color, ko, rankIndex, stoneCount) {
     const profile = profileFor(rankIndex, size);
+    if (profile.readKill && Math.random() >= profile.missTactics) {
+      const kill = findKill(board, size, color, ko);
+      const oppKill = findKill(board, size, Engine.other(color), -1);
+      if (oppKill) {
+        const placed = Engine.placeStone(board, size, oppKill.index % size, (oppKill.index / size) | 0, color, ko);
+        if (placed) return oppKill.index;
+      }
+      if (kill && kill.gain >= 1) return kill.index;
+    }
     const tactical = urgent(board, size, color, ko, profile);
     if (tactical != null && Math.random() > profile.blunder * 0.35) return tactical;
 
@@ -250,19 +340,19 @@
     if (profile.ply >= 1) {
       const opp = Engine.other(color);
       const limit = Math.min(profile.width, scored.length);
+      const depth = profile.ply >= 3 ? 2 : profile.ply >= 2 ? 1 : 0;
       for (let i = 0; i < limit; i++) {
         const move = scored[i];
         const x = move.index % size;
         const y = (move.index / size) | 0;
         const placed = Engine.placeStone(board, size, x, y, color, ko);
         if (!placed) continue;
-        let reply = -1e9;
-        if (profile.ply >= 2) {
-          const replyMove = chooseShallow(placed.board, size, opp, placed.ko, profile, stoneCount + 1);
-          reply = replyMove ? replyMove.score : 0;
-        } else {
+        let reply = 0;
+        if (depth === 0) {
           const replies = rankedMoves(placed.board, size, opp, placed.ko, shallowProfile(profile), stoneCount + 1);
           reply = replies.length ? replies[0].score : 0;
+        } else {
+          reply = readScore(placed.board, size, opp, placed.ko, shallowProfile(profile), stoneCount + 1, depth, Math.min(6, profile.width));
         }
         move.score -= reply * 0.82;
       }
@@ -270,7 +360,6 @@
     }
 
     if (!scored.length) return null;
-    if (scored[0].score < profile.passSlack) return null;
     if (Math.random() < profile.blunder) {
       const pool = scored.slice(0, Math.min(profile.blunderPool, scored.length));
       return pool[(Math.random() * pool.length) | 0].index;
@@ -285,12 +374,34 @@
       missTactics: 1,
       seeLadder: false,
       seeEyes: true,
+      readKill: false,
       ply: 0,
       width: 4,
       noise: 0,
-      passSlack: -400,
       opening: profile.opening,
+      contactPenalty: profile.contactPenalty || 16,
+      capture: profile.capture || 120,
+      atari: profile.atari || 30,
+      atariStone: profile.atariStone || 4,
     };
+  }
+
+  function readScore(board, size, color, ko, profile, stoneCount, depth, width) {
+    const moves = rankedMoves(board, size, color, ko, profile, stoneCount);
+    if (!moves.length) return 0;
+    if (depth <= 0) return moves[0].score;
+    const limit = Math.min(width, moves.length);
+    let best = -1e9;
+    const opp = Engine.other(color);
+    for (let i = 0; i < limit; i++) {
+      const idx = moves[i].index;
+      const placed = Engine.placeStone(board, size, idx % size, (idx / size) | 0, color, ko);
+      if (!placed) continue;
+      const reply = readScore(placed.board, size, opp, placed.ko, profile, stoneCount + 1, depth - 1, Math.max(3, width - 2));
+      const value = moves[i].score - reply * 0.85;
+      if (value > best) best = value;
+    }
+    return best > -1e8 ? best : 0;
   }
 
   function chooseShallow(board, size, color, ko, profile, stoneCount) {
@@ -307,7 +418,16 @@
   }
 
   function chooseMove(game, rankIndex) {
-    const index = chooseOnBoard(game.board, game.size, game.turn, game.ko, rankIndex, game.stoneCount());
+    let index = chooseOnBoard(game.board, game.size, game.turn, game.ko, rankIndex, game.stoneCount());
+    if (index == null) {
+      for (let i = 0; i < game.board.length; i++) {
+        if (game.board[i]) continue;
+        if (Engine.placeStone(game.board, game.size, i % game.size, (i / game.size) | 0, game.turn, game.ko)) {
+          index = i;
+          break;
+        }
+      }
+    }
     if (index == null) return { pass: true };
     return { pass: false, x: index % game.size, y: (index / game.size) | 0 };
   }

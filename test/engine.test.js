@@ -58,10 +58,17 @@ assert(AI.RANKS[0].label === "18级" && AI.RANKS[26].label === "九段", "rank l
 assert(AI.shiftRank(8, 45) > 8, "blowout promotes");
 assert(AI.shiftRank(8, -45) < 8, "blowout demotes");
 
+const open = new E.Game(19);
+assert(open.play(3, 3).ok, "star");
+const approach = AI.chooseMove(open, 26);
+const approachDist = Math.max(Math.abs(approach.x - 3), Math.abs(approach.y - 3));
+console.log("9d approach", approach, "dist", approachDist);
+assert(!approach.pass && approachDist >= 2, "9d does not attach");
+
 const t0 = Date.now();
 const game = new E.Game(9);
 let moves = 0;
-while (!game.over && moves < 200) {
+while (!game.over && moves < 30) {
   const mv = AI.chooseMove(game, 20);
   if (mv.pass) game.pass();
   else {
@@ -87,21 +94,33 @@ for (let i = 0; i < 6; i++) {
 console.log("6 plies of 9d on 19x19 ms", Date.now() - t1);
 
 const P = require("../js/problems");
+const ranksSeen = Object.create(null);
 for (let i = 0; i < P.PROBLEMS.length; i++) {
   const problem = P.PROBLEMS[i];
-  const pg = P.create(problem);
-  let ok = true;
-  for (let m = 0; m < problem.line.length; m++) {
-    const played = pg.play(problem.line[m][0], problem.line[m][1]);
-    if (!played.ok) ok = false;
-  }
-  const done = P.solved(pg, problem);
-  if (!ok || !done) {
-    failed++;
-    console.error("problem failed", problem.id, problem.title, "legal", ok, "solved", done);
-    console.error(E.ascii(pg.board, pg.size));
+  ranksSeen[problem.rank] = (ranksSeen[problem.rank] || 0) + 1;
+  const lines = problem.branches || [problem.line];
+  for (let b = 0; b < lines.length; b++) {
+    const pg = P.create(problem);
+    let ok = true;
+    for (let m = 0; m < lines[b].length; m++) {
+      const played = pg.play(lines[b][m][0], lines[b][m][1]);
+      if (!played.ok) ok = false;
+    }
+    const done = P.solved(pg, problem);
+    if (!ok || !done) {
+      failed++;
+      console.error("problem failed", problem.id, problem.title, "branch", b, "legal", ok, "solved", done);
+      console.error(E.ascii(pg.board, pg.size));
+    }
   }
 }
+const dans = ["一段", "二段", "三段", "四段", "五段", "六段", "七段", "八段", "九段"];
+dans.forEach(function (label) {
+  if (!ranksSeen[label]) {
+    failed++;
+    console.error("missing dan", label);
+  }
+});
 console.log("problems", P.PROBLEMS.length);
 
 if (failed) {

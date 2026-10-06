@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>枫丹对局</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600;700&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="sky"></div>
+  <main class="app">
+    <header class="hero">
+      <p class="eyebrow">Fontaine Go</p>
+      <h1>枫丹对局</h1>
+      <p class="lede">黑子是那维莱特，白子是莱欧斯利。打开页面就能下。</p>
+      <div class="cast">
+        <figure>
+          <img src="assets/black.png" alt="那维莱特">
+          <figcaption>那维莱特 · 黑</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/white.png" alt="莱欧斯利">
+          <figcaption>莱欧斯利 · 白</figcaption>
+        </figure>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section class="stage">
+        <div class="hud">
+          <div class="pill" id="black-side"></div>
+          <div class="pill turn" id="turn-info">准备下棋</div>
+          <div class="pill" id="white-side"></div>
+        </div>
+        <div class="board-frame">
+          <canvas id="board" aria-label="棋盘"></canvas>
+          <div id="banner" class="banner" hidden></div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="tabs" id="tabs" role="tablist">
+          <button type="button" data-mode="vs" class="active">人机对弈</button>
+          <button type="button" data-mode="exam">段位测评</button>
+          <button type="button" data-mode="puzzle">死活练习</button>
+          <button type="button" data-mode="local">本地双人</button>
+        </div>
+        <div id="controls"></div>
+      </aside>
+    </div>
+  </main>
+  <script src="js/engine.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/problems.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

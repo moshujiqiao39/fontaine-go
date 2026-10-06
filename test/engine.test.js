@@ -62,8 +62,12 @@ const open = new E.Game(19);
 assert(open.play(3, 3).ok, "star");
 const approach = AI.chooseMove(open, 26);
 const approachDist = Math.max(Math.abs(approach.x - 3), Math.abs(approach.y - 3));
-console.log("9d approach", approach, "dist", approachDist);
-assert(!approach.pass && approachDist >= 2, "9d does not attach");
+const sameCorner = approach.x <= 5 && approach.y <= 5;
+console.log("9d opening", approach, "dist", approachDist);
+assert(!approach.pass && approachDist >= 8 && !sameCorner, "9d takes an empty corner");
+const tenkyu = AI.chooseMove(open, 8);
+const tenDist = Math.max(Math.abs(tenkyu.x - 3), Math.abs(tenkyu.y - 3));
+assert(!tenkyu.pass && tenDist >= 8, "10k takes an empty corner");
 
 const t0 = Date.now();
 const game = new E.Game(9);

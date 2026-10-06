@@ -47,6 +47,61 @@
     return [size >> 1];
   }
 
+  function cornerReach(size) {
+    if (size >= 19) return 5;
+    if (size >= 13) return 4;
+    return 2;
+  }
+
+  function cornerKey(size, x, y) {
+    const reach = cornerReach(size);
+    const lx = x < size / 2 ? x : size - 1 - x;
+    const ly = y < size / 2 ? y : size - 1 - y;
+    if (lx > reach || ly > reach) return -1;
+    return (x * 2 >= size ? 1 : 0) + (y * 2 >= size ? 2 : 0);
+  }
+
+  function emptyCornerKeys(board, size) {
+    const taken = [false, false, false, false];
+    for (let i = 0; i < board.length; i++) {
+      if (!board[i]) continue;
+      const key = cornerKey(size, i % size, (i / size) | 0);
+      if (key >= 0) taken[key] = true;
+    }
+    const empty = [];
+    for (let k = 0; k < 4; k++) if (!taken[k]) empty.push(k);
+    return empty;
+  }
+
+  function openingPointsForCorner(size, key) {
+    const originX = key & 1 ? size - 1 : 0;
+    const originY = key & 2 ? size - 1 : 0;
+    const sx = originX === 0 ? 1 : -1;
+    const sy = originY === 0 ? 1 : -1;
+    const minD = 2;
+    const maxD = size >= 13 ? 4 : 2;
+    const points = [];
+    for (let dx = minD; dx <= maxD; dx++) {
+      for (let dy = minD; dy <= maxD; dy++) {
+        if (size >= 13 && dx === maxD && dy === maxD) continue;
+        const x = originX + sx * dx;
+        const y = originY + sy * dy;
+        if (x < 0 || y < 0 || x >= size || y >= size) continue;
+        points.push(y * size + x);
+      }
+    }
+    return points;
+  }
+
+  function isStandardOpening(size, x, y) {
+    const lx = Math.min(x, size - 1 - x);
+    const ly = Math.min(y, size - 1 - y);
+    const maxD = size >= 13 ? 4 : 2;
+    if (lx < 2 || ly < 2 || lx > maxD || ly > maxD) return false;
+    if (size >= 13 && lx === maxD && ly === maxD) return false;
+    return cornerKey(size, x, y) >= 0;
+  }
+
   function candidates(board, size, color, ko, profile) {
     const total = size * size;
     let stones = 0;
@@ -76,6 +131,25 @@
     }
     for (let i = 0; i < total; i++) {
       if (board[i] === EMPTY && near[i] && i !== ko) list.push(i);
+    }
+    if (profile.opening && stones > 0 && stones < (size >= 19 ? 20 : 10)) {
+      const empty = emptyCornerKeys(board, size);
+      for (let e = 0; e < empty.length; e++) {
+        const pts = openingPointsForCorner(size, empty[e]);
+        for (let p = 0; p < pts.length; p++) {
+          if (board[pts[p]] === EMPTY && pts[p] !== ko) list.push(pts[p]);
+        }
+      }
+      const lines = size >= 13 ? [2, 3] : [2];
+      for (let li = 0; li < lines.length; li++) {
+        const line = lines[li];
+        for (let t = 2; t < size - 2; t++) {
+          const pts = [line * size + t, (size - 1 - line) * size + t, t * size + line, t * size + (size - 1 - line)];
+          for (let p = 0; p < pts.length; p++) {
+            if (board[pts[p]] === EMPTY && pts[p] !== ko) list.push(pts[p]);
+          }
+        }
+      }
     }
     if (profile.blunder > 0.35) {
       let extra = 0;
@@ -158,19 +232,25 @@
         if (v === color && dist < nearOwn) nearOwn = dist;
       }
     }
-    const early = stoneCount < (size >= 19 ? 40 : 20);
+    const early = stoneCount < (size >= 19 ? 30 : 16);
     if (early && profile.opening && placed.captured === 0 && threatened === 0) {
-      if (nearOpp === 1) score -= profile.contactPenalty;
-      else if (nearOpp === 2) score += 22;
-      else if (nearOpp === 3) score += 10;
-      else if (nearOpp > 4) score -= 8;
-      if (nearOwn === 1 && nearOpp > 2) score -= 12;
+      const empty = emptyCornerKeys(board, size);
+      const key = cornerKey(size, x, y);
       const line = Math.min(x, y, size - 1 - x, size - 1 - y) + 1;
-      if (line === 4) score += 14;
-      else if (line === 3) score += 10;
-      else if (line <= 2) score -= 30;
-      const stars = starPoints(size);
-      if (stoneCount < 8 && stars.indexOf(x) >= 0 && stars.indexOf(y) >= 0) score += 12;
+      if (empty.length) {
+        if (key >= 0 && empty.indexOf(key) >= 0 && isStandardOpening(size, x, y)) score += 110;
+        else if (nearOpp <= 4) score -= 120;
+        else score -= 24;
+      } else if (nearOpp === 1) {
+        score -= profile.contactPenalty;
+      } else if (nearOpp === 3 || nearOpp === 4) {
+        score += 12;
+      }
+      if (nearOwn === 1) score -= 32;
+      else if (nearOwn === 3 || nearOwn === 4) score += 24;
+      if (line === 4) score += 16;
+      else if (line === 3) score += 12;
+      else if (line <= 2) score -= 36;
     } else if (!profile.opening && stoneCount < 8) {
       score -= Math.min(x, y, size - 1 - x, size - 1 - y);
     }
@@ -322,6 +402,8 @@
 
   function chooseOnBoard(board, size, color, ko, rankIndex, stoneCount) {
     const profile = profileFor(rankIndex, size);
+    const openingPhase = profile.opening && stoneCount < (size >= 19 ? 12 : 8) && emptyCornerKeys(board, size).length > 0;
+    if (openingPhase && rankIndex >= 8 && profile.ply < 2) profile.ply = 2;
     if (profile.readKill && Math.random() >= profile.missTactics) {
       const kill = findKill(board, size, color, ko);
       const oppKill = findKill(board, size, Engine.other(color), -1);

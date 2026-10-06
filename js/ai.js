@@ -41,6 +41,9 @@
       atariStone: rank >= 18 ? 9 : 4,
       killDepth: rank >= 22 ? 4 : rank >= 14 ? 3 : 2,
       q: rank >= 22 ? 3 : rank >= 8 ? 2 : 0,
+      seeSacrifice: rank >= 6,
+      seeKo: rank >= 6,
+      sente: rank >= 8 ? 22 : rank >= 3 ? 8 : 0,
       budget: size >= 19 ? (rank >= 22 ? 16000 : rank >= 14 ? 9000 : rank >= 8 ? 4000 : 900) : (rank >= 22 ? 20000 : rank >= 14 ? 12000 : 5000),
     };
   }
@@ -150,6 +153,10 @@
       list.push((size >> 1) * size + (size >> 1));
       return unique(list);
     }
+    if (ko >= 0) {
+      const snap = Engine.placeStone(board, size, ko % size, (ko / size) | 0, color, ko);
+      if (snap && snap.captured >= 2) list.push(ko);
+    }
     for (let i = 0; i < total; i++) {
       if (board[i] === EMPTY && near[i] && i !== ko) list.push(i);
     }
@@ -197,6 +204,80 @@
     return out;
   }
 
+  function sacrificeNet(boardAfter, size, index, color, koAfter) {
+    const self = Engine.collectGroup(boardAfter, size, index, null);
+    if (!self.stones.length || self.libs !== 1) return 0;
+    const lib = self.libPoints[0];
+    const opp = Engine.other(color);
+    const taken = Engine.placeStone(boardAfter, size, lib % size, (lib / size) | 0, opp, koAfter);
+    if (!taken || taken.captured < 1) return 0;
+    const capturer = Engine.collectGroup(taken.board, size, lib, null);
+    if (capturer.color !== opp || capturer.libs !== 1) return 0;
+    const back = capturer.libPoints[0];
+    const recapture = Engine.placeStone(taken.board, size, back % size, (back / size) | 0, color, taken.ko);
+    if (!recapture) return 0;
+    const mine = Engine.collectGroup(recapture.board, size, back, null);
+    const risk = mine.libs <= 1 ? mine.stones.length : 0;
+    return recapture.captured - risk - taken.captured;
+  }
+
+  function koThreat(board, size, color, ko) {
+    const opp = Engine.other(color);
+    const groups = Engine.allGroups(board, size);
+    let best = null;
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+      if (group.color !== opp || group.libs < 1 || group.libs > 2) continue;
+      for (let L = 0; L < group.libPoints.length; L++) {
+        const lib = group.libPoints[L];
+        if (lib === ko) continue;
+        const placed = Engine.placeStone(board, size, lib % size, (lib / size) | 0, color, ko);
+        if (!placed) continue;
+        const self = Engine.collectGroup(placed.board, size, lib, null);
+        if (self.libs <= 1 && placed.captured === 0) continue;
+        let threat = placed.captured * 3;
+        const seen = new Uint8Array(size * size);
+        const around = Engine.neighbors(size, lib);
+        for (let n = 0; n < around.length; n++) {
+          const j = around[n];
+          if (placed.board[j] === opp && !seen[j]) {
+            const after = Engine.collectGroup(placed.board, size, j, seen);
+            if (after.libs === 1) threat += after.stones.length * 2;
+          }
+        }
+        if (threat < 2) continue;
+        if (!best || threat > best.threat) best = { index: lib, threat: threat };
+      }
+    }
+    return best ? best.index : null;
+  }
+
+  function globalFocus(board, size, color) {
+    const bonus = new Int16Array(board.length);
+    const groups = Engine.allGroups(board, size);
+    const own = [];
+    const enemy = [];
+    for (let i = 0; i < groups.length; i++) {
+      const group = groups[i];
+      if (group.libs < 1 || group.libs > 4 || group.stones.length < 2) continue;
+      const item = { libs: group.libs, stones: group.stones.length, points: group.libPoints };
+      if (group.color === color) own.push(item);
+      else enemy.push(item);
+    }
+    function mark(list, weight) {
+      list.sort(function (a, b) { return a.libs - b.libs || b.stones - a.stones; });
+      const n = Math.min(3, list.length);
+      for (let i = 0; i < n; i++) {
+        const group = list[i];
+        const add = weight + group.stones * 4 + (4 - group.libs) * 8;
+        for (let p = 0; p < group.points.length; p++) bonus[group.points[p]] += add;
+      }
+    }
+    mark(own, 26);
+    mark(enemy, 20);
+    return bonus;
+  }
+
   function scoreMove(board, size, index, color, ko, profile, stoneCount) {
     const x = index % size;
     const y = (index / size) | 0;
@@ -205,7 +286,12 @@
     if (!placed) return -1e9;
     let score = placed.captured * (profile.capture || 110);
     const self = Engine.collectGroup(placed.board, size, index, null);
-    if (self.libs <= 1) score -= 70 + self.stones.length * 6;
+    let sacrifice = 0;
+    if (self.libs <= 1 && placed.captured === 0 && profile.seeSacrifice) {
+      sacrifice = sacrificeNet(placed.board, size, index, color, placed.ko);
+    }
+    if (sacrifice > 0) score += sacrifice * (profile.capture || 120) + 40;
+    else if (self.libs <= 1) score -= 70 + self.stones.length * 6;
     else if (self.libs === 2) score += 6;
     else score += 10 + Math.min(self.libs, 5);
 
@@ -213,16 +299,20 @@
     const seen = new Uint8Array(size * size);
     const around = Engine.neighbors(size, index);
     let threatened = 0;
+    let threatenedStones = 0;
     for (let n = 0; n < around.length; n++) {
       const j = around[n];
       if (placed.board[j] === opp && !seen[j]) {
         const g = Engine.collectGroup(placed.board, size, j, seen);
         if (g.libs === 1) {
           threatened++;
+          threatenedStones += g.stones.length;
           score += (profile.atari || 28) + g.stones.length * (profile.atariStone || 4);
         } else if (g.libs === 2) score += 6;
       }
     }
+    if (threatenedStones > 0 && self.libs >= 2 && profile.sente) score += profile.sente + threatenedStones * 6;
+    if (profile.focus) score += profile.focus[index] || 0;
 
     let friendly = 0;
     let enemy = 0;
@@ -339,7 +429,6 @@
       const g = groups[i];
       if (g.libs !== 1) continue;
       const point = g.libPoints[0];
-      if (point === ko) continue;
       const x = point % size;
       const y = (point / size) | 0;
       if (g.color !== color) {
@@ -358,7 +447,8 @@
         }
       }
     }
-    if (bestCapture && bestCapture.gain > 0) return bestCapture.index;
+    const minGain = profile.seeSacrifice ? 2 : 1;
+    if (bestCapture && bestCapture.gain >= minGain) return bestCapture.index;
     if (bestSave && bestSave.libs >= 2) return bestSave.index;
     return null;
   }
@@ -535,6 +625,10 @@
     const profile = profileFor(rankIndex, size);
     const openingPhase = profile.opening && stoneCount < (size >= 19 ? 12 : 8) && emptyCornerKeys(board, size).length > 0;
     if (openingPhase && rankIndex >= 8 && profile.ply < 2) profile.ply = 2;
+    if (ko >= 0) {
+      const snap = Engine.placeStone(board, size, ko % size, (ko / size) | 0, color, ko);
+      if (snap && snap.captured >= 2) return ko;
+    }
     if (profile.readKill && Math.random() >= profile.missTactics) {
       const kill = findKill(board, size, color, ko, profile.killDepth);
       const oppKill = findKill(board, size, Engine.other(color), -1, profile.killDepth);
@@ -544,6 +638,11 @@
       }
       if (kill && kill.gain >= 1) return kill.index;
     }
+    if (ko >= 0 && profile.seeKo && Math.random() >= profile.missTactics) {
+      const threat = koThreat(board, size, color, ko);
+      if (threat != null) return threat;
+    }
+
     const tactical = urgent(board, size, color, ko, profile);
     if (tactical != null && Math.random() > profile.blunder * 0.35) return tactical;
 
@@ -551,6 +650,8 @@
       const book = josekiMove(board, size, color, ko, emptyCornerKeys(board, size).length === 0);
       if (book != null) return book;
     }
+
+    if (rankIndex >= 4 && !openingPhase && stoneCount >= 10) profile.focus = globalFocus(board, size, color);
 
     let scored = rankedMoves(board, size, color, ko, profile, stoneCount);
     if (!scored.length) return null;

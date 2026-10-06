@@ -67,7 +67,6 @@
     if (x < 0 || y < 0 || x >= size || y >= size) return null;
     const index = y * size + x;
     if (board[index] !== EMPTY) return null;
-    if (ko === index) return null;
     const next = board.slice();
     next[index] = color;
     const opp = other(color);
@@ -90,6 +89,8 @@
     if (captured.length === 0) {
       const self = collectGroup(next, size, index, new Uint8Array(size * size));
       if (self.libs === 0) return null;
+    } else if (ko === index && captured.length === 1) {
+      return null;
     }
     return {
       board: next,

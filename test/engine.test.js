@@ -89,6 +89,40 @@ const bend = AI.chooseMove(tsuke, 26);
 console.log("9d tsuke", bend);
 assert(bend.x === 4 && bend.y === 2, "9d plays the attach joseki");
 
+const snapWhite = [[3, 3], [4, 3], [5, 3], [3, 4], [3, 5], [4, 5], [5, 5]];
+const snapBlack = [];
+for (let y = 2; y <= 6; y++) {
+  for (let x = 2; x <= 6; x++) {
+    if (snapWhite.some(function (p) { return p[0] === x && p[1] === y; })) continue;
+    if ((x === 4 && y === 4) || (x === 5 && y === 4)) continue;
+    snapBlack.push([x, y]);
+  }
+}
+const snap = E.Game.fromSetup(9, snapBlack, snapWhite, E.BLACK);
+const throwIn = AI.chooseMove(snap, 26);
+console.log("9d snapback", throwIn);
+assert((throwIn.x === 4 && throwIn.y === 4) || (throwIn.x === 5 && throwIn.y === 4), "9d throws in");
+assert(snap.play(throwIn.x, throwIn.y).ok, "throw-in is legal");
+const takeX = throwIn.x === 4 ? 5 : 4;
+assert(snap.play(takeX, 4).captured === 1, "white takes the throw-in");
+const back = snap.play(throwIn.x, throwIn.y);
+assert(back.ok && back.captured >= 2, "black recaptures the group, got " + (back.ok ? back.captured : back.reason));
+
+const koFight = E.Game.fromSetup(9, [[1, 0], [0, 1], [2, 1], [7, 7]], [[1, 1], [7, 6], [6, 7]], E.BLACK);
+assert(koFight.play(1, 2).captured === 1, "black takes the ko");
+const threat = AI.chooseMove(koFight, 26);
+console.log("9d ko threat", threat);
+const threatIdx = threat.y * 9 + threat.x;
+assert(threatIdx !== koFight.ko, "does not retake the ko");
+const threatened = E.placeStone(koFight.board, 9, threat.x, threat.y, E.WHITE, koFight.ko);
+const target = E.collectGroup(threatened.board, 9, 7 * 9 + 7, null);
+assert(threatened && target.libs === 1, "ko threat puts the other group in atari");
+assert(koFight.play(threat.x, threat.y).ok, "ko threat is legal");
+
+const realKo = E.Game.fromSetup(5, [[0, 0], [0, 1], [2, 1], [1, 2]], [[2, 0], [1, 1]], E.BLACK);
+assert(realKo.play(1, 0).captured === 1, "black takes a real ko");
+assert(!realKo.play(1, 1).ok, "simple ko cannot be retaken at once");
+
 const t0 = Date.now();
 const game = new E.Game(9);
 let moves = 0;

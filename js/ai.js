@@ -17,14 +17,15 @@
   function profileFor(rankIndex, size) {
     const rank = Math.max(0, Math.min(26, rankIndex));
     let ply = 0;
-    if (rank >= 24) ply = 6;
+    if (rank >= 26) ply = 7;
+    else if (rank >= 24) ply = 6;
     else if (rank >= 22) ply = 5;
     else if (rank >= 14) ply = 4;
     else if (rank >= 8) ply = 3;
     else if (rank >= 3) ply = 2;
     else if (rank >= 1) ply = 1;
     let width = rank >= 22 ? 8 : rank >= 14 ? 7 : rank >= 8 ? 6 : 5;
-    if (size >= 19) width = Math.min(width, ply >= 6 ? 6 : ply >= 5 ? 7 : 6);
+    if (size >= 19) width = Math.min(width, ply >= 7 ? 5 : ply >= 6 ? 7 : ply >= 5 ? 7 : 6);
     return {
       blunder: rank <= 2 ? 0.55 - rank * 0.08 : rank <= 8 ? 0.28 - (rank - 2) * 0.025 : rank <= 17 ? Math.max(0.02, 0.08 - (rank - 8) * 0.006) : 0,
       blunderPool: rank < 6 ? 4 : 2,
@@ -40,12 +41,12 @@
       capture: rank >= 18 ? 180 : 120,
       atari: rank >= 18 ? 48 : 30,
       atariStone: rank >= 18 ? 9 : 4,
-      killDepth: rank >= 24 ? 5 : rank >= 22 ? 4 : rank >= 14 ? 3 : 2,
-      q: rank >= 24 ? 4 : rank >= 22 ? 3 : rank >= 8 ? 2 : 0,
+      killDepth: rank >= 26 ? 6 : rank >= 24 ? 5 : rank >= 22 ? 4 : rank >= 14 ? 3 : 2,
+      q: rank >= 26 ? 4 : rank >= 24 ? 4 : rank >= 22 ? 3 : rank >= 8 ? 2 : 0,
       seeSacrifice: rank >= 6,
       seeKo: rank >= 6,
       sente: rank >= 8 ? 22 : rank >= 3 ? 8 : 0,
-      budget: size >= 19 ? (rank >= 24 ? 24000 : rank >= 22 ? 18000 : rank >= 14 ? 9000 : rank >= 8 ? 4000 : 900) : (rank >= 24 ? 28000 : rank >= 22 ? 22000 : rank >= 14 ? 12000 : 5000),
+      budget: size >= 19 ? (rank >= 26 ? 36000 : rank >= 24 ? 28000 : rank >= 22 ? 18000 : rank >= 14 ? 9000 : rank >= 8 ? 4000 : 900) : (rank >= 26 ? 42000 : rank >= 24 ? 32000 : rank >= 22 ? 22000 : rank >= 14 ? 12000 : 5000),
     };
   }
 
@@ -521,7 +522,7 @@
         continue;
       }
       let finished = false;
-      if (depth < 2 && depth + 1 < maxDepth) {
+      if (depth < (maxDepth >= 5 ? 3 : 2) && depth + 1 < maxDepth) {
         for (let k = 0; k < after.libPoints.length; k++) {
           if (capturesGroup(reply.board, size, color, reply.ko, stones, after.libPoints[k], depth + 1, maxDepth)) {
             finished = true;
@@ -569,6 +570,9 @@
     { stones: [[3, 3, "S"], [5, 2, "O"]], move: [2, 5], loose: true },
     { stones: [[3, 3, "O"], [5, 2, "S"], [2, 5, "O"]], move: [8, 2], loose: true },
     { stones: [[3, 3, "S"], [2, 2, "O"]], move: [2, 3], loose: false },
+    { stones: [[3, 3, "O"], [2, 2, "S"], [2, 3, "O"]], move: [2, 1], loose: false },
+    { stones: [[3, 3, "S"], [2, 2, "O"], [2, 3, "S"], [2, 1, "O"]], move: [3, 2], loose: false },
+    { stones: [[3, 3, "S"], [5, 2, "O"], [2, 5, "O"]], move: [2, 2], loose: false },
     { stones: [[3, 2, "O"]], move: [5, 3], loose: true },
     { stones: [[3, 2, "S"], [5, 3, "O"]], move: [2, 4], loose: true },
     { stones: [[3, 2, "S"], [5, 2, "O"]], move: [4, 2], loose: false },
@@ -660,6 +664,109 @@
     return best;
   }
 
+  function hasContact(board, size, color) {
+    const opp = Engine.other(color);
+    for (let i = 0; i < board.length; i++) {
+      if (board[i] !== color) continue;
+      const x = i % size;
+      const y = (i / size) | 0;
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          if (!dx && !dy) continue;
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+          if (board[ny * size + nx] === opp) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function sideClear(board, size, x, y) {
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+        if (board[ny * size + nx]) return false;
+      }
+    }
+    return true;
+  }
+
+  function fusekiMove(board, size, color, ko) {
+    if (size < 13) return null;
+    const lines = starPoints(size);
+    const edge = lines[0];
+    const mid = lines[1];
+    const far = lines[2];
+    const ends = [
+      [edge, edge, far, edge, mid, edge],
+      [edge, far, far, far, mid, far],
+      [edge, edge, edge, far, edge, mid],
+      [far, edge, far, far, far, mid],
+    ];
+    for (let i = 0; i < ends.length; i++) {
+      const a = ends[i][1] * size + ends[i][0];
+      const b = ends[i][3] * size + ends[i][2];
+      const x = ends[i][4];
+      const y = ends[i][5];
+      if (board[a] !== color || board[b] !== color) continue;
+      if (board[y * size + x] || y * size + x === ko || !sideClear(board, size, x, y)) continue;
+      if (Engine.placeStone(board, size, x, y, color, ko)) return y * size + x;
+    }
+    if (size < 19) return null;
+    const families = [
+      [[3, 2], [15, 2], [3, 16], [15, 16]],
+      [[2, 3], [16, 3], [2, 15], [16, 15]],
+    ];
+    const sideOf = {
+      "3,2": [3, 9],
+      "15,2": [15, 9],
+      "3,16": [3, 9],
+      "15,16": [15, 9],
+      "2,3": [9, 3],
+      "16,3": [9, 3],
+      "2,15": [9, 15],
+      "16,15": [9, 15],
+    };
+    for (let f = 0; f < families.length; f++) {
+      const points = families[f];
+      let owned = 0;
+      const missing = [];
+      for (let i = 0; i < points.length; i++) {
+        const x = points[i][0];
+        const y = points[i][1];
+        const v = board[y * size + x];
+        if (v === color) owned++;
+        else if (!v) missing.push(points[i]);
+      }
+      if (owned >= 2) {
+        for (let i = 0; i < missing.length; i++) {
+          const x = missing[i][0];
+          const y = missing[i][1];
+          const key = cornerKey(size, x, y);
+          if (key < 0 || emptyCornerKeys(board, size).indexOf(key) < 0) continue;
+          if (y * size + x === ko || !sideClear(board, size, x, y)) continue;
+          if (Engine.placeStone(board, size, x, y, color, ko)) return y * size + x;
+        }
+      } else if (owned === 1) {
+        for (let i = 0; i < points.length; i++) {
+          const x = points[i][0];
+          const y = points[i][1];
+          if (board[y * size + x] !== color) continue;
+          const side = sideOf[x + "," + y];
+          const sx = side[0];
+          const sy = side[1];
+          if (board[sy * size + sx] || sy * size + sx === ko || !sideClear(board, size, sx, sy)) continue;
+          if (Engine.placeStone(board, size, sx, sy, color, ko)) return sy * size + sx;
+        }
+      }
+    }
+    return null;
+  }
+
   function chooseOnBoard(board, size, color, ko, rankIndex, stoneCount) {
     const profile = profileFor(rankIndex, size);
     const openingPhase = profile.opening && stoneCount < (size >= 19 ? 12 : 8) && emptyCornerKeys(board, size).length > 0;
@@ -686,6 +793,14 @@
     const tactical = urgent(board, size, color, ko, profile);
     if (tactical != null && Math.random() > profile.blunder * 0.35) return tactical;
 
+    if (rankIndex >= 8 || Math.random() > 0.55) {
+      const contact = josekiMove(board, size, color, ko, false);
+      if (contact != null) return contact;
+    }
+    if (rankIndex >= 14 && stoneCount < (size >= 19 ? 22 : 12) && !hasContact(board, size, color)) {
+      const famous = fusekiMove(board, size, color, ko);
+      if (famous != null) return famous;
+    }
     if (rankIndex >= 8 || Math.random() > 0.55) {
       const book = josekiMove(board, size, color, ko, emptyCornerKeys(board, size).length === 0);
       if (book != null) return book;

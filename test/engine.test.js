@@ -89,6 +89,31 @@ const bend = AI.chooseMove(tsuke, 26);
 console.log("9d tsuke", bend);
 assert(bend.x === 4 && bend.y === 2, "9d plays the attach joseki");
 
+const sanren = E.Game.fromSetup(19, [[3, 3], [3, 15]], [[15, 16]], E.BLACK);
+const third = AI.chooseMove(sanren, 26);
+console.log("9d sanrensei", third);
+assert(third.x === 3 && third.y === 9, "9d plays the third star of sanrensei");
+
+const chinese = E.Game.fromSetup(19, [[3, 2]], [[15, 15]], E.BLACK);
+const sideStar = AI.chooseMove(chinese, 26);
+console.log("9d chinese fuseki", sideStar);
+assert(sideStar.x === 3 && sideStar.y === 9, "9d extends the Chinese fuseki");
+
+const shusaku = E.Game.fromSetup(19, [[3, 16], [15, 16]], [[9, 9]], E.BLACK);
+const low = AI.chooseMove(shusaku, 26);
+console.log("9d shusaku", low);
+assert((low.x === 3 && low.y === 2) || (low.x === 15 && low.y === 2), "9d plays another Shusaku komoku");
+
+const invade = E.Game.fromSetup(19, [[3, 3], [2, 3]], [[2, 2]], E.WHITE);
+const stand = AI.chooseMove(invade, 26);
+console.log("9d 3-3 stand", stand);
+assert(stand.x === 2 && stand.y === 1, "9d descends after the 3-3 block");
+
+const swallow = E.Game.fromSetup(19, [[3, 3]], [[5, 2], [2, 5]], E.BLACK);
+const point33 = AI.chooseMove(swallow, 26);
+console.log("9d double approach", point33);
+assert(point33.x === 2 && point33.y === 2, "9d answers a double approach at 3-3");
+
 const snapWhite = [[3, 3], [4, 3], [5, 3], [3, 4], [3, 5], [4, 5], [5, 5]];
 const snapBlack = [];
 for (let y = 2; y <= 6; y++) {

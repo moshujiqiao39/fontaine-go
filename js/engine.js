@@ -176,15 +176,87 @@
     return eyes;
   }
 
+  function fillingLoses(board, size, group, lib) {
+    const color = group.color;
+    const placed = placeStone(board, size, lib % size, (lib / size) | 0, color, -1);
+    if (!placed) return true;
+    if (placed.captured > 0) return false;
+    const self = collectGroup(placed.board, size, lib, null);
+    if (self.libs !== 1) return false;
+    const back = self.libPoints[0];
+    const reply = placeStone(placed.board, size, back % size, (back / size) | 0, other(color), placed.ko);
+    if (!reply) return false;
+    for (let i = 0; i < group.stones.length; i++) {
+      if (reply.board[group.stones[i]]) return false;
+    }
+    return true;
+  }
+
+  function isMutual(board, size, group) {
+    if (group.libs < 1 || group.libs > 3) return false;
+    if (eyeCount(board, size, group) >= 1) return false;
+    if (exclusiveTerritory(board, size, group).area > 0) return false;
+    for (let i = 0; i < group.libPoints.length; i++) {
+      if (!fillingLoses(board, size, group, group.libPoints[i])) return false;
+    }
+    return true;
+  }
+
+  function sharedOpponents(board, size, group) {
+    const found = [];
+    const seenStone = new Uint8Array(board.length);
+    const seenEmpty = new Uint8Array(board.length);
+    const stack = [];
+    const opp = other(group.color);
+    for (let p = 0; p < group.libPoints.length; p++) {
+      seenEmpty[group.libPoints[p]] = 1;
+      stack.push(group.libPoints[p]);
+    }
+    while (stack.length) {
+      const i = stack.pop();
+      const ns = neighbors(size, i);
+      for (let n = 0; n < ns.length; n++) {
+        const j = ns[n];
+        if (board[j] === EMPTY && !seenEmpty[j]) {
+          seenEmpty[j] = 1;
+          stack.push(j);
+        } else if (board[j] === opp && !seenStone[j]) {
+          found.push(collectGroup(board, size, j, seenStone));
+        }
+      }
+    }
+    return found;
+  }
+
   function suggestDead(board, size) {
     const dead = new Uint8Array(board.length);
     const groups = allGroups(board, size);
+    const mutual = new Array(groups.length);
+    const owner = new Int16Array(board.length);
+    for (let i = 0; i < owner.length; i++) owner[i] = -1;
+    for (let g = 0; g < groups.length; g++) {
+      mutual[g] = isMutual(board, size, groups[g]);
+      const stones = groups[g].stones;
+      for (let i = 0; i < stones.length; i++) owner[stones[i]] = g;
+    }
     for (let g = 0; g < groups.length; g++) {
       const group = groups[g];
       const eyes = eyeCount(board, size, group);
       const territory = exclusiveTerritory(board, size, group);
-      const alive = eyes >= 2 || territory.area >= 8 || territory.regions >= 2;
-      if (!alive && eyes === 0 && territory.area <= 2) {
+      let seki = false;
+      if (mutual[g]) {
+        const partners = sharedOpponents(board, size, group);
+        seki = partners.length > 0;
+        for (let p = 0; p < partners.length; p++) {
+          const idx = owner[partners[p].stones[0]];
+          if (idx < 0 || !mutual[idx]) {
+            seki = false;
+            break;
+          }
+        }
+      }
+      const alive = eyes >= 2 || territory.area >= 8 || territory.regions >= 2 || seki;
+      if (!alive && eyes === 0 && territory.area <= 4) {
         for (let i = 0; i < group.stones.length; i++) dead[group.stones[i]] = 1;
       }
     }

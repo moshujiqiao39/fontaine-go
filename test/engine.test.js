@@ -123,6 +123,34 @@ const realKo = E.Game.fromSetup(5, [[0, 0], [0, 1], [2, 1], [1, 2]], [[2, 0], [1
 assert(realKo.play(1, 0).captured === 1, "black takes a real ko");
 assert(!realKo.play(1, 1).ok, "simple ko cannot be retaken at once");
 
+const seki = E.Game.fromSetup(4,
+  [[0, 0], [1, 0], [0, 1], [0, 2], [1, 2], [0, 3], [1, 3]],
+  [[2, 0], [3, 0], [3, 1], [2, 2], [3, 2], [2, 3], [3, 3]],
+  E.BLACK);
+const sekiDead = E.suggestDead(seki.board, 4);
+let sekiMarked = 0;
+for (let i = 0; i < sekiDead.length; i++) if (sekiDead[i]) sekiMarked++;
+assert(sekiMarked === 0, "seki stones stay alive");
+const sekiScore = E.scorePosition(seki.board, 4, sekiDead);
+assert(sekiScore.black === 7 && sekiScore.white === 14.5, "seki scores stones only, shared points are dame");
+
+const eyes = E.Game.fromSetup(7,
+  [[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [1, 2], [5, 2], [1, 3], [3, 3], [5, 3], [1, 4], [5, 4], [1, 5], [2, 5], [3, 5], [4, 5], [5, 5]],
+  [],
+  E.BLACK);
+const eyeDead = E.suggestDead(eyes.board, 7);
+let livingMarked = 0;
+for (let i = 0; i < eyeDead.length; i++) if (eyeDead[i]) livingMarked++;
+assert(livingMarked === 0, "two eyes live");
+
+const buried = E.Game.fromSetup(13,
+  [[3, 3], [9, 3], [3, 9], [0, 0], [1, 0], [2, 0], [0, 1], [2, 1], [0, 2], [1, 2], [2, 2], [10, 10], [11, 10], [12, 10], [10, 11], [12, 11], [10, 12], [11, 12]],
+  [[9, 9], [1, 1], [11, 11]],
+  E.BLACK);
+const leaveDead = AI.chooseMove(buried, 26);
+console.log("9d leaves dead stones", leaveDead);
+assert(!(leaveDead.x === 1 && leaveDead.y === 1) && !(leaveDead.x === 11 && leaveDead.y === 11), "9d does not capture stones that are already dead");
+
 const t0 = Date.now();
 const game = new E.Game(9);
 let moves = 0;

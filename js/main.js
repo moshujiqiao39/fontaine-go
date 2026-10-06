@@ -302,7 +302,7 @@
         field("我方", '<select id="color"><option value="1">那维莱特（黑，先手）</option><option value="2">莱欧斯利（白）</option></select>'),
         '<button type="button" class="primary" id="start">开始对局</button>',
         state.phase === "score" ? "" : playActions(),
-        '<p class="help">中国规则，黑先，白贴 7.5 目。段位越高，越会算吃子和征子。下完点「数子」，也可以认输。</p>',
+        '<p class="help">中国规则，黑先，白贴 7.5 目。段位越高，越会算吃子、征子、死活和数子。下完点「数子」，也可以认输。</p>',
       ].join("");
     } else if (state.mode === "exam") {
       const meta = state.exam
